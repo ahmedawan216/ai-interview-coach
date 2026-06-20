@@ -13,11 +13,24 @@ body,
   padding-bottom: 1rem;
 }
 
+/* Responsive height fix for deployed environments */
+html,
+body,
+.stApp {
+  overflow-y: auto !important;
+  min-height: 100vh;
+}
+
+.block-container {
+  padding-top: 1.5rem !important;
+  padding-bottom: 1.5rem !important;
+}
+
 /* LOGO / HEADER */
 
 .logo-wrap {
-  text-align: center;
-  padding: 1.5rem 0 0.5rem;
+    text-align: center;
+    padding: 0.8rem 0 0.3rem;
 }
 
 .logo-title {
