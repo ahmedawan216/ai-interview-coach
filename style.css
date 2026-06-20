@@ -319,11 +319,6 @@ div[data-testid="column"]:first-of-type > div {
   line-height: 1.4;
 }
 
-/* Hide the audio player UI but keep it playing */
-audio {
-  display: none;
-}
-
 /* BADGE ROW — round + company side by side */
 .badge-row {
   display: flex;
