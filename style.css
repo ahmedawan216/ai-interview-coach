@@ -29,8 +29,8 @@ body,
 /* LOGO / HEADER */
 
 .logo-wrap {
-    text-align: center;
-    padding: 0.8rem 0 0.3rem;
+  text-align: center;
+  padding: 0.8rem 0 0.3rem;
 }
 
 .logo-title {
@@ -352,4 +352,9 @@ audio {
 }
 .stMarkdown code {
   color: #93c5fd !important;
+}
+/* Show a minimal audio control instead of fully hiding */
+audio {
+  height: 32px;
+  opacity: 0.7;
 }
