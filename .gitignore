@@ -4,3 +4,4 @@ __pycache__/
 .streamlit/
 venv/
 *.mp3
+sessions/

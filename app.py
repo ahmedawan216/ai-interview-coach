@@ -1,5 +1,8 @@
 import streamlit as st
 import time
+import json
+import os
+import uuid
 from agents.resume_parser import parse_resume
 from agents.technical_agent import technical_agent
 from agents.behavioral_agent import behavioral_agent
@@ -8,6 +11,32 @@ from agents.feedback_agent import feedback_agent
 from agents.interview_manager import interview_manager
 from agents.filler_detector import detect_fillers
 from agents.voice_agent import text_to_speech
+
+SESSIONS_DIR = "sessions"
+os.makedirs(SESSIONS_DIR, exist_ok=True)
+
+def save_session():
+    if "session_id" in st.session_state:
+        data = {
+            "stage": st.session_state.stage,
+            "state": st.session_state.state,
+            "question": st.session_state.question,
+            "history": st.session_state.history,
+            "q_count": st.session_state.q_count,
+            "report": st.session_state.report,
+            "shown_questions": list(st.session_state.get("shown_questions", set())),
+            "last_filler": st.session_state.last_filler,
+        }
+        path = os.path.join(SESSIONS_DIR, f"{st.session_state.session_id}.json")
+        with open(path, "w") as f:
+            json.dump(data, f)
+
+def load_session(session_id):
+    path = os.path.join(SESSIONS_DIR, f"{session_id}.json")
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return json.load(f)
+    return None
 
 def stream_question(text):
     placeholder = st.empty()
@@ -38,6 +67,14 @@ st.set_page_config(
 with open("style.css") as f:
     st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
+#  Session ID setup (survives refresh via URL)
+query_params = st.query_params
+if "sid" in query_params:
+    st.session_state.session_id = query_params["sid"]
+elif "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())[:8]
+    st.query_params["sid"] = st.session_state.session_id
+
 # ── Session State Init ──
 if "stage" not in st.session_state:
     st.session_state.stage = "setup"
@@ -53,12 +90,26 @@ if "report" not in st.session_state:
     st.session_state.report = ""
 if "last_filler" not in st.session_state:
     st.session_state.last_filler = None
+if "shown_questions" not in st.session_state:
+    st.session_state.shown_questions = set()
+
+# ── Load saved session on refresh (runs once) ──
+if "loaded" not in st.session_state:
+    saved = load_session(st.session_state.session_id)
+    if saved:
+        st.session_state.stage = saved["stage"]
+        st.session_state.state = saved["state"]
+        st.session_state.question = saved["question"]
+        st.session_state.history = saved["history"]
+        st.session_state.q_count = saved["q_count"]
+        st.session_state.report = saved["report"]
+        st.session_state.shown_questions = set(saved.get("shown_questions", []))
+        st.session_state.last_filler = saved.get("last_filler")
+    st.session_state.loaded = True
 
 TOTAL_QUESTIONS = 5
 
-# ══════════════════════════════
 # STAGE 1 — SETUP
-# ══════════════════════════════
 if st.session_state.stage == "setup":
 
     st.markdown("""
@@ -113,15 +164,14 @@ if st.session_state.stage == "setup":
                     q = behavioral_agent(st.session_state.state)
                 st.session_state.question = q
                 st.session_state.stage = "interview"
+                save_session()
                 st.rerun()
         else:
             st.warning("Please upload your resume and enter a job role first.")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ══════════════════════════════
-# STAGE 2 — INTERVIEW
-# ══════════════════════════════
+# STAGE 2 - INTERVIEW
 elif st.session_state.stage == "interview":
 
     st.markdown("""
@@ -146,17 +196,14 @@ elif st.session_state.stage == "interview":
         st.markdown(f'<div class="progress-label">Question {st.session_state.q_count + 1} of {TOTAL_QUESTIONS}</div>', unsafe_allow_html=True)
         st.progress(progress_pct / 100)
 
-        if "shown_questions" not in st.session_state:
-            st.session_state.shown_questions = set()
-
         if st.session_state.q_count not in st.session_state.shown_questions:
             if "```" in st.session_state.question:
-                # Has code — show directly with proper markdown rendering
                 st.markdown('<div class="interviewer-label">🎙️ Interviewer</div>', unsafe_allow_html=True)
                 st.markdown(st.session_state.question)
             else:
                 stream_question(st.session_state.question)
             st.session_state.shown_questions.add(st.session_state.q_count)
+            save_session()
         else:
             if "```" in st.session_state.question:
                 st.markdown('<div class="interviewer-label">🎙️ Interviewer</div>', unsafe_allow_html=True)
@@ -207,7 +254,6 @@ elif st.session_state.stage == "interview":
         </div>
         """, unsafe_allow_html=True)
 
-        # Filler word box — same style, right below the 3 score boxes
         if st.session_state.last_filler and st.session_state.last_filler['total_fillers'] > 0:
             filler_list = ", ".join([f"{w} ×{c}" for w, c in st.session_state.last_filler['breakdown'].items()])
             st.markdown(f"""
@@ -225,11 +271,17 @@ elif st.session_state.stage == "interview":
 
             with st.spinner("Evaluating your answer..."):
                 evaluation = evaluator_agent(st.session_state.question, answer)
+                st.session_state.history.append({
+                    "question": st.session_state.question,
+                    "answer": answer,
+                    "evaluation": evaluation
+                })
                 st.session_state.state["interview_history"] += f"\nQ: {st.session_state.question}\nA: {answer}\nScore: Technical {evaluation['technical_accuracy']}/10, Communication {evaluation['communication']}/10, Confidence {evaluation['confidence']}/10. Feedback: {evaluation['feedback']}\n"
                 st.session_state.q_count += 1
 
             if st.session_state.q_count >= TOTAL_QUESTIONS:
                 st.session_state.stage = "results"
+                save_session()
                 st.rerun()
             else:
                 with st.spinner("Preparing next question..."):
@@ -239,6 +291,7 @@ elif st.session_state.stage == "interview":
                     else:
                         next_q = behavioral_agent(st.session_state.state, user_answer=answer)
                     st.session_state.question = next_q
+                    save_session()
                     st.rerun()
         else:
             st.warning("Please type your answer before submitting.")
@@ -256,6 +309,7 @@ elif st.session_state.stage == "results":
     if not st.session_state.report:
         with st.spinner("Generating your personalized report..."):
             st.session_state.report = feedback_agent(st.session_state.state)
+            save_session()
 
     st.markdown(f"""
     <div class="report-card">
@@ -278,6 +332,10 @@ elif st.session_state.stage == "results":
 
     with col2:
         if st.button("🔄 New Interview", use_container_width=True):
+            session_path = os.path.join(SESSIONS_DIR, f"{st.session_state.session_id}.json")
+            if os.path.exists(session_path):
+                os.remove(session_path)
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
+            st.query_params.clear()
             st.rerun()
